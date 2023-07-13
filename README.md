@@ -9,8 +9,10 @@ Remove Ads from Podcasts
 
 
 ## Todo's:
+- top prio: establish a podcast feed after proccesed files
+- clean up code
+- main function
 - try open source llm to get away from openai
-- establish a podcast feed after proccesed files
 -- take over meta data and description of podcast to new adfree feed
 -- docker container for easy deployment
 - improve message to chatgpt -> testing with correct identified podcasts
