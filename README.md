@@ -6,6 +6,7 @@ Remove Ads from Podcasts
 3. cut in chunks and send to chatgpt to identify advertisment
 4. merge parts that are close to each other
 5. cut advertisment from mp3
+6. Profit
 
 
 ## Todo's:
