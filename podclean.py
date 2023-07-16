@@ -47,11 +47,18 @@ def download_podcast(pod,latest_num=1):
             print(f'Downloaded {filename}')
         filenames.append(filename)
     return filenames
-def text_to_spech(filename):
+import threading
+
+# Create a mutex object
+mutex = threading.Lock()
+def spech_to_text(filename):
     filename2=filename[:-4]+'.bi'
     if os.path.exists(filename2):
         print("Transcripted file exist")
     else:
+        if os.path.exists(filename2):
+            print("Transcripted file exist")
+            return filename2
         print("Transcripted file does not exist")
         model = whisper.load_model('base')
         text = model.transcribe(filename)
@@ -86,7 +93,7 @@ def ask_chatgpt(messages):
           model="gpt-3.5-turbo",
           messages=messages,
           temperature=0,
-          max_tokens=2048,
+          max_tokens=1000,
           top_p=1,
           frequency_penalty=0,
           presence_penalty=0
@@ -95,49 +102,39 @@ def ask_chatgpt(messages):
 
 
 def identify_advertisement_segments(text_segments,file,completion=False):
-    data = load_json_data(file.split(".")[0]+".json")
-    hash_key = generate_hash_key(text_segments)
-    if hash_key in data:
-        response_text = data[hash_key]
-        response = openai.Response(None, {"choices": [{"text": response_text}]})
+    # Query OpenAI for the response
+    restart_sequence = "\n"
+    if completion:
+        responses = openai.Completion.create(
+            model="gpt-3.5-turbo",
+            prompt=f"""
+            Translate {text_segments} into English (if needed). Review as a whole, cluster into topics, then determine likelihood of each being ad/sponsored content.
+            \n
+            Please give the likelihood in the following form:\n
+            id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise)
+            \n
+            """,
+            temperature=0,
+            max_tokens=2048,
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0
+        )
+        response = responses.choices[0].text
     else:
-        # Query OpenAI for the response
-        restart_sequence = "\n"
-        if completion:
-            response = openai.Completion.create(
-                model="gpt-3.5-turbo",
-                prompt=f"""
-                Translate {text_segments} into English (if needed). Review as a whole, cluster into topics, then determine likelihood of each being ad/sponsored content.
-                \n
-                Please give the likelihood in the following form:\n
-                id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise)
-                \n
-                """,
-                temperature=0,
-                max_tokens=2048,
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0
-            )
-            data[hash_key] = response.choices[0].text
-        else:
-            messages=[
-                    {
-                      "role": "system",
-                      "content": f"""Translate the following segments into English (if needed).\n
-                        {text_segments}\n
-                        Review as a whole, cluster into topics, then determine likelihood of each topic and therefore segment being ad/sponsored content.\n
-                        If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
+        messages=[
+                {
+                  "role": "system",
+                  "content": f"""Translate the following segments into English (if needed).\n
+                    {text_segments}\n
+                    Review as a whole, cluster into topics, then determine likelihood of each topic and therefore segment being ad/sponsored content.\n
+                    If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
 
-                        Don't awnser anything but the form.\n
-                        Only complete the likelihood in the following form:\nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters."""
-                    }
-                  ]
-            data[hash_key]=ask_chatgpt(messages)
-            response=data[hash_key]
-                    # Cache the question and response in the JSON file
-        
-        save_json_data(data, JSON_FILE_PATH)
+                    Don't awnser anything but the form.\n
+                    Only complete the likelihood in the following form:\nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters."""
+                }
+              ]
+        response=ask_chatgpt(messages)
     print(response)
     return response
 def pre_process_text(filename):
@@ -188,7 +185,7 @@ def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
         raise NotImplementedError(f"""num_tokens_from_messages() is not presently implemented for model {model}.
   See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens.""")
         
-def process_text_segments(text_segments, file, chunk_size=70, overlap_size=10, max_retries=3):
+def process_text_segments(text_segments, file, chunk_size=50, overlap_size=10, max_retries=3):
     """
     Processes text segments in chunks and returns cumulative results.
     Includes overlap between chunks to maintain context.
@@ -215,7 +212,12 @@ def process_text_segments(text_segments, file, chunk_size=70, overlap_size=10, m
         retry_count = 0
         while retry_count < max_retries:
 #             print(formatted_segments)
+            result_string=""
             result_string = identify_advertisement_segments(formatted_segments,file)
+            # except:
+            #     retry_count += 1
+                # print("asking ChatGPT failed. Retrying...")
+                # pass
             chunk_results = parse_advertisement_segments(result_string)
             if chunk_results:
                 cumulative_results.update(chunk_results)
@@ -368,74 +370,6 @@ def get_ip_address():
     s.connect(("8.8.8.8", 80))
     return s.getsockname()[0]
 SERVER_HOME = 'http://{}'.format(get_ip_address())
-# def parse_feed(feed_url, new_mp3_url):
-#     d = feedparser.parse(feed_url)
-
-#     fg = FeedGenerator()
-#     fg.load_extension('podcast')
-#     fg.link(href=SERVER_HOME)
-#     fg.podcast.itunes_author('Cory Doctorow')
-#     fg.podcast.itunes_category([
-#         {'cat': 'Book', 'sub': 'Technology'},
-#         {'cat': 'Book', 'sub': 'Science Fiction'}
-#     ])
-#     fg.podcast.itunes_complete('yes')
-#     fg.podcast.itunes_image('/'.join([SERVER_HOME, 'image/radicalized-full-US-cover-large.jpg']))
-#     fg.title('radicalized')
-#     fg.podcast.itunes_subtitle('Four tales of our present moment')
-#     fg.description("""If you want a better future tomorrow, you're going to have to fight for it today.
-#     Here are four urgent stories from author and activist Cory Doctorow, four social, technological and economic visions of the world today and its near – all too near – future.
-#     'Unauthorized Bread' is a tale of immigration, toxic economic stratification and a young woman's perilously illegal quest to fix a broken toaster.
-#     In 'Model Minority' a superhero finds himself way out his depth when he confronts the corruption of the police and justice system.
-#     'Radicalized' is the story of a desperate husband, a darknet forum and the birth of a violent uprising against the US health care system.
-#     The final story, 'The Masque of the Red Death', tracks an uber-wealthy survivalist and his followers as they hole up and attempt to ride out the collapse of society.""")
-#     for entry in d.entries:
-#         fe = fg.add_entry()
-#         fe.id(entry.link)
-#         fe.title(entry.title)
-#         fe.description(entry.description)
-#         fe.enclosure(url=new_mp3_url, type='audio/mpeg')
-
-#     rssfeed = fg.rss_str(pretty=True)
-#     return rssfeed
-
-#@app.route('/')
-#def serve_feed():
-#    feed_url="https://feeds.feedburner.com/HacksOnTap"
-#    # filenames=download_podcast('https://pythonbytes.fm/episodes/rss')
-#    # filenames=download_podcast('https://feeds.megaphone.fm/hubermanlab')
-#    #filenames=download_podcast('https://feeds.simplecast.com/54nAGcIl')
-#    # filenames=download_podcast('https://rss.wbur.org/onpoint/podcast')
-#    #filenames=download_podcast('https://changelog.com/podcast/feed')
-#    # filenames=download_podcast('https://feeds.lagedernation.org/feeds/ldn-mp3.xml')
-#    filenames=download_podcast(feed_url)
-#    #filenames=download_podcast("https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/f5d5fac6-77be-47e6-9aee-ae32006cd8c3/b26cbbeb-86eb-4b97-9b34-ae32006cd8d6/podcast.rss")
-     
-#    # for file in filenames:
-#    file=filenames[0]
-#    output_file = file.split(".")[0]+"_adfree.mp3"
-#    if os.path.exists(file):
-#        new_feed = parse_feed(feed_url, output_file)
-#        response = Response(new_feed, mimetype='application/rss+xml')
-#        return response
-
-#    file_bi=text_to_spech(file)
-
-#    text_segments,content = pre_process_text(file_bi)
-#    results_dict = process_text_segments(text_segments,file)
-#    print(results_dict)
-
-#    merged_start_times,merged_end_times=ad_segments_to_times(results_dict, content)
-#    final_start_times, final_end_times=merge_time_segments(merged_start_times,merged_end_times, min_duration=5.0, max_gap=15.0)
-#    print(final_start_times)
-#    print(final_end_times)
-
-#    print(file)
-
-#    remove_ads(file, output_file, final_start_times, final_end_times)  
-#    new_feed = parse_feed(feed_url, output_file)
-#    response = Response(new_feed, mimetype='application/rss+xml')
-#    return response
 from urllib.parse import urlencode
 import hashlib
 from flask import Flask, send_file, request
@@ -443,10 +377,10 @@ from flask import Flask, send_file, request
 PODCAST_FOLDER = 'podcasts'
 PROCESSED_FOLDER = 'processed'
 
-def get_podcast_file(mp3_url):
-    # calculate a hash of the URL to use as filename
-    filename = hashlib.md5(mp3_url.encode()).hexdigest()
-    return os.path.join(PODCAST_FOLDER, filename)
+# def get_podcast_file(mp3_url):
+#     # calculate a hash of the URL to use as filename
+#     filename = hashlib.md5(mp3_url.encode()).hexdigest()
+#     return os.path.join(PODCAST_FOLDER, filename)
 
 def get_processed_file(mp3_url):
     # calculate a hash of the URL to use as filename
@@ -454,8 +388,6 @@ def get_processed_file(mp3_url):
     return os.path.join(PROCESSED_FOLDER, filename)
 
 def download_and_process_podcast(mp3_url):
-    # podcast_file = get_podcast_file(mp3_url)
-    # processed_file = get_processed_file(mp3_url)
     podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
     processed_file = podcast_file + '_processed.mp3'
 
@@ -472,23 +404,11 @@ def download_and_process_podcast(mp3_url):
             with open(podcast_file, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     file.write(chunk)   
-    # if not os.path.exists(podcast_file):
-    #     # download podcast
-    #     response = requests.get(mp3_url, stream=True)
-    #     response.raise_for_status()
-    #     with open(podcast_file, 'wb') as file:
-    #         for chunk in response.iter_content(chunk_size=8192):
-    #             file.write(chunk)
 
     if not os.path.exists(processed_file):
         # process podcast
         # add your processing logic here
-        # output_file = file.split(".")[0]+"_adfree.mp3"
-        # if os.path.exists(file):
-        #     new_feed = parse_feed(feed_url, processed_file)
-            # response = Response(new_feed, mimetype='application/rss+xml')
-            # return response
-        file_bi=text_to_spech(podcast_file)
+        file_bi=spech_to_text(podcast_file)
         text_segments,content = pre_process_text(file_bi)
         results_dict = process_text_segments(text_segments,podcast_file)
         print(results_dict)
@@ -510,57 +430,47 @@ def serve_podcast():
     
     processed_file = get_processed_file(mp3_url)
     if not os.path.exists(processed_file):
-        processed_file = download_and_process_podcast(mp3_url)
+        print("Process podcast")
+        mutex.acquire()
+        if os.path.exists(processed_file):
+            mutex.release()
+            return send_file(processed_file, mimetype='audio/mpeg')
+        try:
+            processed_file = download_and_process_podcast(mp3_url)
+        finally:
+            mutex.release()
     
     return send_file(processed_file, mimetype='audio/mpeg')
 
 from feedgen.feed import FeedGenerator
-
-def generate_new_feed(feed):
-    fg = FeedGenerator()
-    fg.title(feed.feed.title)
-    fg.link(href=feed.feed.link, rel='alternate')
-    fg.description(feed.feed.description)
-
-    for entry in feed.entries:
-        fe = fg.add_entry()
-        fe.title(entry.title)
-        fe.link(href=entry.enclosures[0].href)
-        fe.description(entry.description)
-
-    return fg.rss_str(pretty=True)
+from lxml import etree
+from datetime import datetime as dt
+import requests
 @app.route('/rss')
 def serve_rss():
     # get old rss feed url from query params
     old_rss_url = request.args.get('feed')
 
-    # parse old rss feed
-    old_feed = feedparser.parse(old_rss_url)
+# Fetch the original RSS feed
+    response = requests.get(old_rss_url)
+    root = etree.fromstring(response.content)
 
-    fg = FeedGenerator()
-    fg.title(old_feed.feed.title)
-    fg.link(href=old_feed.feed.link, rel='alternate')
-    fg.description(old_feed.feed.description)
-
-    # replace mp3 urls with our server's podcast endpoint
-    for entry in old_feed.entries:
-        fe = fg.add_entry()
-        fe.title(entry.title)
-        fe.link(href=entry.link)
-        fe.description(entry.description)
-        
-        # Redirect enclosure href to our podcast endpoint
-        mp3_url = entry.enclosures[0].href
+# Change the MP3 URL(s)
+    for enclosure in root.xpath('//enclosure'):
+        # mp3_url = entry.enclosures[0].href
+        mp3_url = enclosure.get('url')
         new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
-        fe.enclosure(new_mp3_url, 0, 'audio/mpeg')
+        # fe.enclosure(new_mp3_url, 0, 'audio/mpeg')
+        # new_mp3_url = mp3_url.replace('www.old-mp3-url.com', 'www.new-mp3-url.com')
+        enclosure.set('url', new_mp3_url)
 
-    # generate new rss feed
-    new_feed = fg.rss_str(pretty=True)
+# Write out the result
+    # tree = etree.ElementTree(root)
+    # tree.write('new_feed.xml', xml_declaration=True, encoding='utf-8')
+
+    new_feed = etree.tostring(root, xml_declaration=True, encoding='utf-8')
 
     return Response(new_feed, mimetype='application/rss+xml')
 
-@app.route('/index.xml')
-def get_feed():
-    return Response(fg.rss_str(), mimetype='application/rss+xml')
 if __name__ == '__main__':
-    app.run(host='192.168.178.32', port=58003)
+    app.run(host='0.0.0.0', port=58003)

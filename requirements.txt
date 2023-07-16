@@ -3,7 +3,6 @@ flask
 feedgen
 feedparser
 requests
-whisper
-# hashlib
+whisper  #pip install git+https://github.com/openai/whisper.git 
 pydub
 tiktoken
