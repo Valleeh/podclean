@@ -29,7 +29,7 @@ python podclean.py
 
 ## Usage
 
-On your phone, find a Pod-catcher app that supports URL RSS feeds (e.g., Apple Podcasts even supports local RSS URLs, while Overcast only supports public RSS URLs and would require a DynDNS).
+On your phone, find a Pod-catcher app that supports URL RSS feeds (e.g., Apple Podcasts even supports local RSS URLs, while Overcast only supports public RSS URLs and would require DynDNS or an actual server).
 
 Search for the RSS feed of the podcast you want to subscribe to. Get the server address and create a URL as follows:
 
@@ -63,6 +63,7 @@ After subscribing, your podcatcher will be redirected to your server to get the 
 - Explore open-source alternatives to OpenAI
 - Create a Docker container for easier deployment
 - Improve interaction with ChatGPT for better ad identification -> Testing, possiblity to flag wrong ad-marks etc.
+- Adaptive chunksize
 - Add functionality to clean other content types such as triggering content, child abuse, war, etc.  -> Create your bubble... there would be even the possiblity to generate voices and let them talk what your bubble likes
 - Implement a database of processed podcasts. This would only store start and end times of advertisements, allowing for efficient reprocessing of podcasts without legal concerns.
 
