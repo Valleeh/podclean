@@ -11,6 +11,7 @@ Remove Ads from Podcasts
 
 ## Todo's:
 - top prio: establish a podcast feed after proccesed files
+- atlernative use whsiper API instead of local use
 - clean up code
 - main function
 - try open source llm to get away from openai

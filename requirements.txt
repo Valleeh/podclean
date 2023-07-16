@@ -1,0 +1,9 @@
+openai
+flask
+feedgen
+feedparser
+requests
+whisper
+# hashlib
+pydub
+tiktoken

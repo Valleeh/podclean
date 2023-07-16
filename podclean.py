@@ -225,7 +225,7 @@ def process_text_segments(text_segments, file, chunk_size=70, overlap_size=10, m
                 print("Parsing failed. Retrying...")
 
     return cumulative_results
-def ad_segments_to_times(ad_segments):
+def ad_segments_to_times(ad_segments,content):
     start_times = []
     end_times = []
 
@@ -354,29 +354,213 @@ def merge_time_segments(start_times, end_times, min_duration=5.0, max_gap=20.0):
         merged_end_times.append(current_end)
 
     return merged_start_times, merged_end_times
-# filenames=download_podcast('https://pythonbytes.fm/episodes/rss')
-# filenames=download_podcast('https://feeds.megaphone.fm/hubermanlab')
-#filenames=download_podcast('https://feeds.simplecast.com/54nAGcIl')
-# filenames=download_podcast('https://rss.wbur.org/onpoint/podcast')
-#filenames=download_podcast('https://changelog.com/podcast/feed')
-# filenames=download_podcast('https://feeds.lagedernation.org/feeds/ldn-mp3.xml')
-filenames=download_podcast('https://feeds.feedburner.com/HacksOnTap')
-#filenames=download_podcast("https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/f5d5fac6-77be-47e6-9aee-ae32006cd8c3/b26cbbeb-86eb-4b97-9b34-ae32006cd8d6/podcast.rss")
- 
-# for file in filenames:
-file=filenames[0]
-file_bi=text_to_spech(file)
+from flask import Flask, Response
+from feedgen.feed import FeedGenerator
+import feedparser
 
-text_segments,content = pre_process_text(file_bi)
-results_dict = process_text_segments(text_segments,file)
-print(results_dict)
+app = Flask(__name__)
+import socket
+def get_ip_address():
+    """Get current IP address.
+    From https://stackoverflow.com/a/166589/379566
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    return s.getsockname()[0]
+SERVER_HOME = 'http://{}'.format(get_ip_address())
+# def parse_feed(feed_url, new_mp3_url):
+#     d = feedparser.parse(feed_url)
 
-merged_start_times,merged_end_times=ad_segments_to_times(results_dict)
-final_start_times, final_end_times=merge_time_segments(merged_start_times,merged_end_times, min_duration=5.0, max_gap=15.0)
-print(final_start_times)
-print(final_end_times)
+#     fg = FeedGenerator()
+#     fg.load_extension('podcast')
+#     fg.link(href=SERVER_HOME)
+#     fg.podcast.itunes_author('Cory Doctorow')
+#     fg.podcast.itunes_category([
+#         {'cat': 'Book', 'sub': 'Technology'},
+#         {'cat': 'Book', 'sub': 'Science Fiction'}
+#     ])
+#     fg.podcast.itunes_complete('yes')
+#     fg.podcast.itunes_image('/'.join([SERVER_HOME, 'image/radicalized-full-US-cover-large.jpg']))
+#     fg.title('radicalized')
+#     fg.podcast.itunes_subtitle('Four tales of our present moment')
+#     fg.description("""If you want a better future tomorrow, you're going to have to fight for it today.
+#     Here are four urgent stories from author and activist Cory Doctorow, four social, technological and economic visions of the world today and its near – all too near – future.
+#     'Unauthorized Bread' is a tale of immigration, toxic economic stratification and a young woman's perilously illegal quest to fix a broken toaster.
+#     In 'Model Minority' a superhero finds himself way out his depth when he confronts the corruption of the police and justice system.
+#     'Radicalized' is the story of a desperate husband, a darknet forum and the birth of a violent uprising against the US health care system.
+#     The final story, 'The Masque of the Red Death', tracks an uber-wealthy survivalist and his followers as they hole up and attempt to ride out the collapse of society.""")
+#     for entry in d.entries:
+#         fe = fg.add_entry()
+#         fe.id(entry.link)
+#         fe.title(entry.title)
+#         fe.description(entry.description)
+#         fe.enclosure(url=new_mp3_url, type='audio/mpeg')
 
-print(file)
-output_file = file.split(".")[0]+"_adfree.mp3"
+#     rssfeed = fg.rss_str(pretty=True)
+#     return rssfeed
 
-remove_ads(file, output_file, final_start_times, final_end_times)  
+#@app.route('/')
+#def serve_feed():
+#    feed_url="https://feeds.feedburner.com/HacksOnTap"
+#    # filenames=download_podcast('https://pythonbytes.fm/episodes/rss')
+#    # filenames=download_podcast('https://feeds.megaphone.fm/hubermanlab')
+#    #filenames=download_podcast('https://feeds.simplecast.com/54nAGcIl')
+#    # filenames=download_podcast('https://rss.wbur.org/onpoint/podcast')
+#    #filenames=download_podcast('https://changelog.com/podcast/feed')
+#    # filenames=download_podcast('https://feeds.lagedernation.org/feeds/ldn-mp3.xml')
+#    filenames=download_podcast(feed_url)
+#    #filenames=download_podcast("https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/f5d5fac6-77be-47e6-9aee-ae32006cd8c3/b26cbbeb-86eb-4b97-9b34-ae32006cd8d6/podcast.rss")
+     
+#    # for file in filenames:
+#    file=filenames[0]
+#    output_file = file.split(".")[0]+"_adfree.mp3"
+#    if os.path.exists(file):
+#        new_feed = parse_feed(feed_url, output_file)
+#        response = Response(new_feed, mimetype='application/rss+xml')
+#        return response
+
+#    file_bi=text_to_spech(file)
+
+#    text_segments,content = pre_process_text(file_bi)
+#    results_dict = process_text_segments(text_segments,file)
+#    print(results_dict)
+
+#    merged_start_times,merged_end_times=ad_segments_to_times(results_dict, content)
+#    final_start_times, final_end_times=merge_time_segments(merged_start_times,merged_end_times, min_duration=5.0, max_gap=15.0)
+#    print(final_start_times)
+#    print(final_end_times)
+
+#    print(file)
+
+#    remove_ads(file, output_file, final_start_times, final_end_times)  
+#    new_feed = parse_feed(feed_url, output_file)
+#    response = Response(new_feed, mimetype='application/rss+xml')
+#    return response
+from urllib.parse import urlencode
+import hashlib
+from flask import Flask, send_file, request
+
+PODCAST_FOLDER = 'podcasts'
+PROCESSED_FOLDER = 'processed'
+
+def get_podcast_file(mp3_url):
+    # calculate a hash of the URL to use as filename
+    filename = hashlib.md5(mp3_url.encode()).hexdigest()
+    return os.path.join(PODCAST_FOLDER, filename)
+
+def get_processed_file(mp3_url):
+    # calculate a hash of the URL to use as filename
+    filename = hashlib.md5(mp3_url.encode()).hexdigest()
+    return os.path.join(PROCESSED_FOLDER, filename)
+
+def download_and_process_podcast(mp3_url):
+    # podcast_file = get_podcast_file(mp3_url)
+    # processed_file = get_processed_file(mp3_url)
+    podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
+    processed_file = podcast_file + '_processed.mp3'
+
+    # Check if the processed file already exists
+    if not os.path.exists(processed_file):
+        # If the processed file doesn't exist, check if the podcast needs to be downloaded
+        if not os.path.exists(podcast_file):
+            # Ensure the directory exists before downloading
+            os.makedirs(os.path.dirname(podcast_file), exist_ok=True)
+            
+            # Download the podcast
+            response = requests.get(mp3_url, stream=True)
+            response.raise_for_status()
+            with open(podcast_file, 'wb') as file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    file.write(chunk)   
+    # if not os.path.exists(podcast_file):
+    #     # download podcast
+    #     response = requests.get(mp3_url, stream=True)
+    #     response.raise_for_status()
+    #     with open(podcast_file, 'wb') as file:
+    #         for chunk in response.iter_content(chunk_size=8192):
+    #             file.write(chunk)
+
+    if not os.path.exists(processed_file):
+        # process podcast
+        # add your processing logic here
+        # output_file = file.split(".")[0]+"_adfree.mp3"
+        # if os.path.exists(file):
+        #     new_feed = parse_feed(feed_url, processed_file)
+            # response = Response(new_feed, mimetype='application/rss+xml')
+            # return response
+        file_bi=text_to_spech(podcast_file)
+        text_segments,content = pre_process_text(file_bi)
+        results_dict = process_text_segments(text_segments,podcast_file)
+        print(results_dict)
+
+        merged_start_times,merged_end_times=ad_segments_to_times(results_dict, content)
+        final_start_times, final_end_times=merge_time_segments(merged_start_times,merged_end_times, min_duration=5.0, max_gap=15.0)
+        print(final_start_times)
+        print(final_end_times)
+        print(podcast_file)
+        remove_ads(podcast_file, processed_file, final_start_times, final_end_times)  
+        print("Processsing finished")
+
+    return processed_file
+
+@app.route('/podcast')
+def serve_podcast():
+    # get podcast url from query params
+    mp3_url = request.args.get('url')
+    
+    processed_file = get_processed_file(mp3_url)
+    if not os.path.exists(processed_file):
+        processed_file = download_and_process_podcast(mp3_url)
+    
+    return send_file(processed_file, mimetype='audio/mpeg')
+
+from feedgen.feed import FeedGenerator
+
+def generate_new_feed(feed):
+    fg = FeedGenerator()
+    fg.title(feed.feed.title)
+    fg.link(href=feed.feed.link, rel='alternate')
+    fg.description(feed.feed.description)
+
+    for entry in feed.entries:
+        fe = fg.add_entry()
+        fe.title(entry.title)
+        fe.link(href=entry.enclosures[0].href)
+        fe.description(entry.description)
+
+    return fg.rss_str(pretty=True)
+@app.route('/rss')
+def serve_rss():
+    # get old rss feed url from query params
+    old_rss_url = request.args.get('feed')
+
+    # parse old rss feed
+    old_feed = feedparser.parse(old_rss_url)
+
+    fg = FeedGenerator()
+    fg.title(old_feed.feed.title)
+    fg.link(href=old_feed.feed.link, rel='alternate')
+    fg.description(old_feed.feed.description)
+
+    # replace mp3 urls with our server's podcast endpoint
+    for entry in old_feed.entries:
+        fe = fg.add_entry()
+        fe.title(entry.title)
+        fe.link(href=entry.link)
+        fe.description(entry.description)
+        
+        # Redirect enclosure href to our podcast endpoint
+        mp3_url = entry.enclosures[0].href
+        new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
+        fe.enclosure(new_mp3_url, 0, 'audio/mpeg')
+
+    # generate new rss feed
+    new_feed = fg.rss_str(pretty=True)
+
+    return Response(new_feed, mimetype='application/rss+xml')
+
+@app.route('/index.xml')
+def get_feed():
+    return Response(fg.rss_str(), mimetype='application/rss+xml')
+if __name__ == '__main__':
+    app.run(host='192.168.178.32', port=58003)
