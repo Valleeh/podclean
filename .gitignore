@@ -1,0 +1,6 @@
+.
+venv
+venv/*
+podcasts/*
+*.mp3
+secrets.json
