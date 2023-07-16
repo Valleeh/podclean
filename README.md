@@ -19,6 +19,7 @@ Create a `secret.json` file in the project root directory, and include your Open
     "OPENAI_API_KEY": "your_api_key"
 }
 ```
+how to get an OPENAI-API key -> https://www.howtogeek.com/885918/how-to-get-an-openai-api-key/
 
 Then, run the application:
 
@@ -42,11 +43,13 @@ For example:
 http://192.168.178.21:58003/rss?feed=url_of_podcast_rss
 ```
 
-After subscribing, your podcatcher will be redirected to your server to get the newest episode. Please note that processing the file takes time, so expect to click on an episode and receive the processed file about the time it takes to brew a cup of coffee later.
+After subscribing, your podcatcher will be redirected to your server to get the newest episode. Please note that processing the file takes time, so expect to click on an episode and receive the processed file about the time it takes to brew a cup of coffee later. 
 
-## Workflow
+:warning: **IMPORTANT: Each use of ChatGPT costs around $0.04 per podcast. Please keep this in mind when using PodClean!**
 
-1. Download Podcast from RSS-feed
+## Processing Steps
+
+1. Download Podcast given in the RSS-feed
 2. Convert Speech to text using Whisper
 3. Divide the transcript into chunks and send to ChatGPT to identify advertisements
 4. Merge parts that are close to each other
@@ -56,7 +59,7 @@ After subscribing, your podcatcher will be redirected to your server to get the 
 ## Future Improvements
 
 - Refactor code for better readability and performance
-- Utilize Whisper API for more efficient speech-to-text conversion
+- Utilize Whisper API for more efficient speech-to-text conversion -> higher cost(approx 1-2$ per podcast), could run on a raspi
 - Explore open-source alternatives to OpenAI
 - Create a Docker container for easier deployment
 - Improve interaction with ChatGPT for better ad identification -> Testing, possiblity to flag wrong ad-marks etc.
