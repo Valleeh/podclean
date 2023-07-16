@@ -213,11 +213,12 @@ def process_text_segments(text_segments, file, chunk_size=50, overlap_size=10, m
         while retry_count < max_retries:
 #             print(formatted_segments)
             result_string=""
-            result_string = identify_advertisement_segments(formatted_segments,file)
-            # except:
-            #     retry_count += 1
-                # print("asking ChatGPT failed. Retrying...")
-                # pass
+            try:
+                result_string = identify_advertisement_segments(formatted_segments,file)
+            except:
+                retry_count += 1
+                print("asking ChatGPT failed. Retrying...")
+                continue
             chunk_results = parse_advertisement_segments(result_string)
             if chunk_results:
                 cumulative_results.update(chunk_results)

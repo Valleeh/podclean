@@ -1,5 +1,25 @@
 # podclean
 Remove Ads from Podcasts
+## Usage
+virutalven venv
+source venv/bin/activate
+pip install -r requirements.txt
+Create secret.json
+{
+    "OPENAI_API_KEY": "your_api_key"
+}
+python podclean.py
+
+on your phone:
+Get a Pod-catcher that supports URL RSS feeds
+(Apple Podcasts support even local rss urls)
+Overcast just public rss urls -> DynDNS
+Search for a Rss feed of the podcast you want to subscribe to
+get the address of the server
+create url
+Example use: http://192.168.178.21:58003/rss?feed=url_of_podcast_rss
+after subscribing your podcatcher will be redirected to your server to get the newest episode. Since processing the file needs time expect to click on an episode and get the processed file about a cup of coffe later.
+
 ## Description
 1. Download Podcast from RSS-feed
 2. Spech to text using whispter
@@ -10,7 +30,6 @@ Remove Ads from Podcasts
 
 
 ## Todo's:
-- top prio: establish a podcast feed after proccesed files
 - atlernative use whsiper API instead of local use
 - clean up code
 - main function
