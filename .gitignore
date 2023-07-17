@@ -4,3 +4,4 @@ venv/*
 podcasts/*
 *.mp3
 secrets.json
+settings.json

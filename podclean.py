@@ -5,60 +5,24 @@ import re
 import requests
 import feedparser
 import whisper
-# import numpy as np
-# import pandas as pd
 import os
-# openai.api_key = os.getenv("OPENAI_API_KEY")
 def load_api_key(secrets_file="secrets.json"):
     with open(secrets_file) as f:
         secrets = json.load(f)
     return secrets["OPENAI_API_KEY"]
 
-# Set secret API key
-# Typically, we'd use an environment variable (e.g., echo "export OPENAI_API_KEY='yourkey'" >> ~/.zshrc)
-# However, using "internalConsole" in launch.json requires setting it in the code for compatibility with Hebrew
 api_key = load_api_key()
 openai.api_key = api_key
-def download_podcast(pod,latest_num=1):
-    # Parse the RSS feed
-    feed = feedparser.parse(pod)
-
-    # Get the latest episode
-    latest_episodes = feed.entries[:latest_num]
-    filenames=[]
-    for episode in latest_episodes:
-        # Get the URL of the mp3 file
-        mp3_url = episode.enclosures[0].href
-
-        # Get the filename
-        filename = os.path.basename(mp3_url.split("?")[0])
-
-        if os.path.exists(filename):
-            print("MP3 already downloaded")
-        else:
-            print(f'Will download {filename}')
-            # Download the mp3 file
-            response = requests.get(mp3_url, stream=True)
-            response.raise_for_status()
-            with open(filename, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
-
-            print(f'Downloaded {filename}')
-        filenames.append(filename)
-    return filenames
 import threading
 
 # Create a mutex object
 mutex = threading.Lock()
 def spech_to_text(filename):
+    # filename = os.path.basename(filename)
     filename2=filename[:-4]+'.bi'
     if os.path.exists(filename2):
         print("Transcripted file exist")
     else:
-        if os.path.exists(filename2):
-            print("Transcripted file exist")
-            return filename2
         print("Transcripted file does not exist")
         model = whisper.load_model('base')
         text = model.transcribe(filename)
@@ -67,22 +31,6 @@ def spech_to_text(filename):
         #printing the transcribe
         print(text['text'])
     return filename2
-
-import json
-import hashlib
-
-JSON_FILE_PATH = "data.json"
-
-def load_json_data(file_path):
-    try:
-        with open(file_path, 'r') as json_file:
-            return json.load(json_file)
-    except FileNotFoundError:
-        return {}
-
-def save_json_data(data, file_path):
-    with open(file_path, 'w') as json_file:
-        json.dump(data, json_file)
 
 def generate_hash_key(text_segments):
     return hashlib.sha256(text_segments.encode()).hexdigest()
@@ -100,41 +48,20 @@ def ask_chatgpt(messages):
     )
     return response["choices"][0]["message"]["content"]
 
-
 def identify_advertisement_segments(text_segments,file,completion=False):
-    # Query OpenAI for the response
-    restart_sequence = "\n"
-    if completion:
-        responses = openai.Completion.create(
-            model="gpt-3.5-turbo",
-            prompt=f"""
-            Translate {text_segments} into English (if needed). Review as a whole, cluster into topics, then determine likelihood of each being ad/sponsored content.
-            \n
-            Please give the likelihood in the following form:\n
-            id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise)
-            \n
-            """,
-            temperature=0,
-            max_tokens=2048,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0
-        )
-        response = responses.choices[0].text
-    else:
-        messages=[
-                {
-                  "role": "system",
-                  "content": f"""Translate the following segments into English (if needed).\n
-                    {text_segments}\n
-                    Review as a whole, cluster into topics, then determine likelihood of each topic and therefore segment being ad/sponsored content.\n
-                    If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
+    messages=[
+            {
+              "role": "system",
+              "content": f"""Translate the following segments into English (if needed).\n
+                {text_segments}\n
+                Review as a whole, cluster into topics, then determine likelihood of each topic and therefore segment being ad/sponsored content.\n
+                If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
 
-                    Don't awnser anything but the form.\n
-                    Only complete the likelihood in the following form:\nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters."""
-                }
-              ]
-        response=ask_chatgpt(messages)
+                Don't awnser anything but the form.\n
+                Only complete the likelihood in the following form:\nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters."""
+            }
+          ]
+    response=ask_chatgpt(messages)
     print(response)
     return response
 def pre_process_text(filename):
@@ -428,46 +355,66 @@ def download_and_process_podcast(mp3_url):
 def serve_podcast():
     # get podcast url from query params
     mp3_url = request.args.get('url')
-    
+
+    if mp3_url is None:
+        abort(400, description="No URL provided")
+
+    # parse and check url scheme
+    parsed_url = urlparse(mp3_url)
+    if parsed_url.scheme not in ['https']:
+        abort(400, description="Invalid URL scheme: Only HTTPS is accepted")
+
     processed_file = get_processed_file(mp3_url)
     if not os.path.exists(processed_file):
         print("Process podcast")
         mutex.acquire()
-        if os.path.exists(processed_file):
-            mutex.release()
-            return send_file(processed_file, mimetype='audio/mpeg')
         try:
+            if os.path.exists(processed_file):
+                return send_file(processed_file, mimetype='audio/mpeg')
             processed_file = download_and_process_podcast(mp3_url)
         finally:
             mutex.release()
     
     return send_file(processed_file, mimetype='audio/mpeg')
 
-from feedgen.feed import FeedGenerator
-from lxml import etree
-from datetime import datetime as dt
+
+
+from flask import request, abort, Response
+from urllib.parse import urlparse, urlencode
 import requests
+from lxml import etree
 @app.route('/rss')
 def serve_rss():
     # get old rss feed url from query params
     old_rss_url = request.args.get('feed')
 
-# Fetch the original RSS feed
-    response = requests.get(old_rss_url)
-    root = etree.fromstring(response.content)
+    if old_rss_url is None:
+        abort(400, description="No feed URL provided")
 
-# Change the MP3 URL(s)
+    # parse and check url scheme
+    parsed_url = urlparse(old_rss_url)
+    if parsed_url.scheme not in ['https']:
+        abort(400, description="Invalid URL scheme: Only HTTPS is accepted")
+
+    try:
+        # Fetch the original RSS feed
+        response = requests.get(old_rss_url)
+        response.raise_for_status()  # Raises a HTTPError if the response status isn't 200
+    except requests.HTTPError as http_err:
+        abort(400, description=f"HTTP error occurred: {http_err}")
+    except Exception as err:
+        abort(500, description=f"Other error occurred: {err}")
+
+    try:
+        root = etree.fromstring(response.content)
+    except etree.ParseError as err:
+        abort(400, description=f"Error parsing the XML: {err}")
+
+    # Change the MP3 URL(s)
     for enclosure in root.xpath('//enclosure'):
-        # mp3_url = entry.enclosures[0].href
         mp3_url = enclosure.get('url')
         new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
-        # fe.enclosure(new_mp3_url, 0, 'audio/mpeg')
-        # new_mp3_url = mp3_url.replace('www.old-mp3-url.com', 'www.new-mp3-url.com')
         enclosure.set('url', new_mp3_url)
-
-# Write out the result
-    # tree = etree.ElementTree(root)
-    # tree.write('new_feed.xml', xml_declaration=True, encoding='utf-8')
 
     new_feed = etree.tostring(root, xml_declaration=True, encoding='utf-8')
 
