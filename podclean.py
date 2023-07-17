@@ -3,7 +3,6 @@ import json
 import math
 import re
 import requests
-import feedparser
 import whisper
 import os
 def load_api_key(secrets_file="secrets.json"):
@@ -35,20 +34,20 @@ def spech_to_text(filename):
 def generate_hash_key(text_segments):
     return hashlib.sha256(text_segments.encode()).hexdigest()
 
-def ask_chatgpt(messages):
+def ask_chatgpt(messages,num_segments=1000):
     print(num_tokens_from_messages(messages))
     response = openai.ChatCompletion.create(
           model="gpt-3.5-turbo",
           messages=messages,
           temperature=0,
-          max_tokens=1000,
+          max_tokens=num_segments*3,
           top_p=1,
           frequency_penalty=0,
           presence_penalty=0
     )
     return response["choices"][0]["message"]["content"]
 
-def identify_advertisement_segments(text_segments,file,completion=False):
+def identify_advertisement_segments(text_segments,num_segments,file,completion=False):
     messages=[
             {
               "role": "system",
@@ -61,8 +60,8 @@ def identify_advertisement_segments(text_segments,file,completion=False):
                 Only complete the likelihood in the following form:\nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters."""
             }
           ]
-    response=ask_chatgpt(messages)
-    print(response)
+    response=ask_chatgpt(messages,num_segments)
+#     print(response)
     return response
 def pre_process_text(filename):
     with open(filename, 'r') as file:
@@ -109,10 +108,85 @@ def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
         num_tokens += 2  # every reply is primed with <im_start>assistant
         return num_tokens
     else:
-        raise NotImplementedError(f"""num_tokens_from_messages() is not presently implemented for model {model}.
-  See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens.""")
+        raise NotImplementedError(f"""num_tokens_from_messages() is not presently implemented for model {model}.""")
         
-def process_text_segments(text_segments, file, chunk_size=50, overlap_size=10, max_retries=3):
+def process_text_segments(text_segments, file, max_retries=3, max_tokens=3900):
+    """
+    Processes text segments and returns cumulative results.
+
+    Args:
+        text_segments: The text segments to be processed.
+        max_retries: The maximum number of retries if parsing fails.
+        max_tokens: The maximum token count per request.
+
+    Returns:
+        A dictionary containing the cumulative results.
+    """
+    cumulative_results = {}
+    batch_segments = []
+    current_tokens = 0
+    COMPLETION_TOKENS_PER_SEGMENT = 6
+
+    for num_segments, segment in enumerate(text_segments):
+        segment_text = f"{segment['id']}:{segment['text']}"
+        segment_tokens = num_tokens_from_messages([{"role": "user", "content": segment_text}], model="gpt-3.5-turbo-0613")
+
+        # If adding the current segment and its corresponding completion doesn't exceed the max_tokens limit
+        if current_tokens + segment_tokens + COMPLETION_TOKENS_PER_SEGMENT < max_tokens:
+            batch_segments.append(segment)
+            current_tokens += segment_tokens + COMPLETION_TOKENS_PER_SEGMENT
+        else:
+            # Process the current batch
+            retry_count = 0
+            while retry_count < max_retries:
+                formatted_segments = "\n".join(f"{seg['id']}:{seg['text']}" for seg in batch_segments)
+                result_string = ""
+                try:
+                    result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
+                except:
+                    retry_count += 1
+                    print("asking ChatGPT failed. Retrying...")
+                    continue
+
+                chunk_results = parse_advertisement_segments(result_string)
+                for id, value in chunk_results.items():
+                    if value == 1:
+                        print(text_segments[id])
+                if chunk_results:
+                    cumulative_results.update(chunk_results)
+                    break  # Break out of the retry loop if parsing is successful
+                else:
+                    retry_count += 1
+                    print("Parsing failed. Retrying...")
+
+            # Start a new batch with the current segment
+            batch_segments = [segment]
+            current_tokens = segment_tokens + COMPLETION_TOKENS_PER_SEGMENT
+
+    # Process the last batch
+    if batch_segments:
+        retry_count = 0
+        while retry_count < max_retries:
+            formatted_segments = "\n".join(f"{seg['id']}:{seg['text']}" for seg in batch_segments)
+            result_string = ""
+            try:
+                result_string = identify_advertisement_segments(formatted_segments, file)
+                print(formatted_segments)
+            except:
+                retry_count += 1
+                print("asking ChatGPT failed. Retrying...")
+                continue
+
+            chunk_results = parse_advertisement_segments(result_string)
+            if chunk_results:
+                cumulative_results.update(chunk_results)
+                break  # Break out of the retry loop if parsing is successful
+            else:
+                retry_count += 1
+                print("Parsing failed. Retrying...")
+
+    return cumulative_results
+def aprocess_text_segments(text_segments, file, chunk_size=50, overlap_size=10, max_retries=3):
     """
     Processes text segments in chunks and returns cumulative results.
     Includes overlap between chunks to maintain context.
@@ -142,6 +216,7 @@ def process_text_segments(text_segments, file, chunk_size=50, overlap_size=10, m
             result_string=""
             try:
                 result_string = identify_advertisement_segments(formatted_segments,file)
+                print(formatted_segments)
             except:
                 retry_count += 1
                 print("asking ChatGPT failed. Retrying...")
@@ -190,8 +265,6 @@ def ad_segments_to_times(ad_segments,content):
 
         merged_end_times.append(current_end)
 
-#     print(merged_start_times)  # Output: [205.0, 274.0, 310.0, 364.0]
-#     print(merged_end_times)  # Output: [211.0, 288.0, 321.0, 386.0]
     return merged_start_times,merged_end_times
 
 from pydub import AudioSegment 
@@ -284,8 +357,7 @@ def merge_time_segments(start_times, end_times, min_duration=5.0, max_gap=20.0):
         merged_end_times.append(current_end)
 
     return merged_start_times, merged_end_times
-from flask import Flask, Response
-from feedgen.feed import FeedGenerator
+from flask import Flask, Response, send_file, request
 import feedparser
 
 app = Flask(__name__)
@@ -300,20 +372,6 @@ def get_ip_address():
 SERVER_HOME = 'http://{}'.format(get_ip_address())
 from urllib.parse import urlencode
 import hashlib
-from flask import Flask, send_file, request
-
-PODCAST_FOLDER = 'podcasts'
-PROCESSED_FOLDER = 'processed'
-
-# def get_podcast_file(mp3_url):
-#     # calculate a hash of the URL to use as filename
-#     filename = hashlib.md5(mp3_url.encode()).hexdigest()
-#     return os.path.join(PODCAST_FOLDER, filename)
-
-def get_processed_file(mp3_url):
-    # calculate a hash of the URL to use as filename
-    filename = hashlib.md5(mp3_url.encode()).hexdigest()
-    return os.path.join(PROCESSED_FOLDER, filename)
 
 def download_and_process_podcast(mp3_url):
     podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
@@ -363,8 +421,9 @@ def serve_podcast():
     parsed_url = urlparse(mp3_url)
     if parsed_url.scheme not in ['https']:
         abort(400, description="Invalid URL scheme: Only HTTPS is accepted")
-
-    processed_file = get_processed_file(mp3_url)
+    podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
+    processed_file = podcast_file + '_processed.mp3'
+    print(processed_file)
     if not os.path.exists(processed_file):
         print("Process podcast")
         mutex.acquire()
@@ -374,7 +433,7 @@ def serve_podcast():
             processed_file = download_and_process_podcast(mp3_url)
         finally:
             mutex.release()
-    
+    print(processed_file)
     return send_file(processed_file, mimetype='audio/mpeg')
 
 
