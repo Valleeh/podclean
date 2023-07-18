@@ -35,12 +35,12 @@ def generate_hash_key(text_segments):
     return hashlib.sha256(text_segments.encode()).hexdigest()
 
 def ask_chatgpt(messages,num_segments=1000):
-    print(num_tokens_from_messages(messages))
+    print(num_tokens_from_string(str(messages)))
     response = openai.ChatCompletion.create(
           model="gpt-3.5-turbo",
           messages=messages,
           temperature=0,
-          max_tokens=num_segments*3,
+          max_tokens=num_segments*6,
           top_p=1,
           frequency_penalty=0,
           presence_penalty=0
@@ -51,17 +51,16 @@ def identify_advertisement_segments(text_segments,num_segments,file,completion=F
     messages=[
             {
               "role": "system",
-              "content": f"""Translate the following segments into English (if needed).\n
-                {text_segments}\n
-                Review as a whole, cluster into topics, then determine likelihood of each topic and therefore segment being ad/sponsored content.\n
-                If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
-
-                Don't awnser anything but the form.\n
-                Only complete the likelihood in the following form:\nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters."""
+              "content": f"""Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ### {text_segments} ###
+Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
+segment being ad/sponsored content.\n
+If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
+Don't awnser anything but the form.\n
+Only complete the likelihood in the following form:\n id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise) . Only Numbers and delimiters."""
             }
           ]
     response=ask_chatgpt(messages,num_segments)
-#     print(response)
+    print(response)
     return response
 def pre_process_text(filename):
     with open(filename, 'r') as file:
@@ -91,26 +90,120 @@ def parse_advertisement_segments(result_string):
     return parsed_results
 
 import tiktoken
-def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
-    """Returns the number of tokens used by a list of messages."""
+import ast
+def num_tokens_from_messages(message_str, model="gpt-3.5-turbo-0613"):
+    """Returns the number of tokens used by a string message."""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
         encoding = tiktoken.get_encoding("cl100k_base")
+    
     if model == "gpt-3.5-turbo-0613":  # note: future models may deviate from this
         num_tokens = 0
-        for message in messages:
+        message = ast.literal_eval(message_str)
+        for key, value in message.items():
             num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
-            for key, value in message.items():
-                num_tokens += len(encoding.encode(value))
-                if key == "name":  # if there's a name, the role is omitted
-                    num_tokens += -1  # role is always required and always 1 token
+            num_tokens += len(encoding.encode(value))
+            if key == "name":  # if there's a name, the role is omitted
+                num_tokens += -1  # role is always required and always 1 token
         num_tokens += 2  # every reply is primed with <im_start>assistant
         return num_tokens
     else:
         raise NotImplementedError(f"""num_tokens_from_messages() is not presently implemented for model {model}.""")
-        
-def process_text_segments(text_segments, file, max_retries=3, max_tokens=3900):
+
+
+def num_tokens_from_string(string: str, encoding_name="gpt-3.5-turbo-0613") -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.encoding_for_model(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
+def process_text_segments(text_segments, file, max_retries=3, max_tokens=3696):
+    """
+    Processes text segments and returns cumulative results.
+
+    Args:
+        text_segments: The text segments to be processed.
+        max_retries: The maximum number of retries if parsing fails.
+        max_tokens: The maximum token count per request.
+
+    Returns:
+        A dictionary containing the cumulative results.
+    """
+    cumulative_results = {}
+    batch_segments = []
+    COMPLETION_TOKENS_PER_SEGMENT = 6
+
+    msg_tokens=num_tokens_from_string(f""""role": "assistant", "content": "Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ###  ###
+Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
+segment being ad/sponsored content.
+If non-ad-segments are in between ad-segments, consider classifying them as ad.
+Don't awnser anything but the form.
+Only complete the likelihood in the following form:nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters.""", "gpt-3.5-turbo")
+    # print(f"Message tokens: {msg_tokens}")  # Debug print
+    current_tokens = msg_tokens
+    num_segments = 0
+    for segment in text_segments:
+        segment_text = f"{segment['id']}:{segment['text']}"
+        segment_tokens=num_tokens_from_string(segment_text)
+        # print(f"Segment tokens: {segment_tokens}")  # Debug print
+
+        # If adding the current segment, its corresponding completion, and message tokens doesn't exceed the max_tokens limit
+        if current_tokens + segment_tokens + COMPLETION_TOKENS_PER_SEGMENT  <= max_tokens:
+            batch_segments.append(segment)
+            current_tokens += segment_tokens + COMPLETION_TOKENS_PER_SEGMENT
+            num_segments += 1
+        else:
+            # Process the current batch
+            retry_count = 0
+            while retry_count < max_retries:
+                formatted_segments = "\n".join(f"{seg['id']}:{seg['text']}" for seg in batch_segments)
+                # print(f"Formatted segments: {formatted_segments}")  # Debug print
+                result_string = ""
+                try:
+                    result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
+                    # print(f"Result string tokens: {num_tokens_from_string(result_string)}")  # Debug print
+                except openai.error.ServiceUnavailableError:
+                    try_count += 1
+                    print(f"asking ChatGPT failed...")
+                    continue
+                chunk_results = parse_advertisement_segments(result_string)
+                for id, value in chunk_results.items():
+                    if value == 1:
+                        print(text_segments[id])
+                if chunk_results:
+                    cumulative_results.update(chunk_results)
+
+                # Start a new batch with the current segment
+                batch_segments = [segment]
+                current_tokens = msg_tokens
+                num_segments = 1  # Resetting num_segments for the new batch
+                break  # Break out of the retry loop
+
+    # Process the last batch
+    if batch_segments:
+        retry_count = 0
+        while retry_count < max_retries:
+            formatted_segments = "\n".join(f"{seg['id']}:{seg['text']}" for seg in batch_segments)
+            # print(f"Last formatted segments: {formatted_segments}")  # Debug print
+            result_string = ""
+            try:
+                result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
+                # print(f"Last result string tokens: {num_tokens_from_string(result_string)}")  # Debug print
+            except:
+                retry_count += 1
+                print("asking ChatGPT failed. Retrying...")
+                continue
+
+            chunk_results = parse_advertisement_segments(result_string)
+            if chunk_results:
+                cumulative_results.update(chunk_results)
+            break  # Break out of the retry loop
+
+    return cumulative_results
+
+
+def bprocess_text_segments(text_segments, file, max_retries=3, max_tokens=3900):
     """
     Processes text segments and returns cumulative results.
 
@@ -143,9 +236,9 @@ def process_text_segments(text_segments, file, max_retries=3, max_tokens=3900):
                 result_string = ""
                 try:
                     result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
-                except:
-                    retry_count += 1
-                    print("asking ChatGPT failed. Retrying...")
+                except Exception as e:
+                    try_count += 1
+                    print(f"asking ChatGPT failed Reason: {e}")
                     continue
 
                 chunk_results = parse_advertisement_segments(result_string)
@@ -172,9 +265,9 @@ def process_text_segments(text_segments, file, max_retries=3, max_tokens=3900):
             try:
                 result_string = identify_advertisement_segments(formatted_segments, file)
                 print(formatted_segments)
-            except:
-                retry_count += 1
-                print("asking ChatGPT failed. Retrying...")
+            except Exception as e:
+                try_count += 1
+                print(f"asking ChatGPT failed Reason: {e}")
                 continue
 
             chunk_results = parse_advertisement_segments(result_string)
@@ -447,6 +540,13 @@ def serve_rss():
     # get old rss feed url from query params
     old_rss_url = request.args.get('feed')
 
+    # read the whitelist from a file, each url on a separate line
+    try:
+        with open('whitelist.txt', 'r') as f:
+            whitelist = [line.strip() for line in f.readlines()]
+    except IOError:
+        abort(500, description="Cannot read whitelist file")
+
     if old_rss_url is None:
         abort(400, description="No feed URL provided")
 
@@ -469,11 +569,12 @@ def serve_rss():
     except etree.ParseError as err:
         abort(400, description=f"Error parsing the XML: {err}")
 
-    # Change the MP3 URL(s)
-    for enclosure in root.xpath('//enclosure'):
-        mp3_url = enclosure.get('url')
-        new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
-        enclosure.set('url', new_mp3_url)
+    # Only change the MP3 URL(s) if the feed is not in the whitelist
+    if old_rss_url not in whitelist:
+        for enclosure in root.xpath('//enclosure'):
+            mp3_url = enclosure.get('url')
+            new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
+            enclosure.set('url', new_mp3_url)
 
     new_feed = etree.tostring(root, xml_declaration=True, encoding='utf-8')
 
