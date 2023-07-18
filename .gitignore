@@ -8,3 +8,4 @@ secrets.json
 settings.json
 *.opml
 *.ipynb
+*.txt
