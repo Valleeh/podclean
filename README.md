@@ -59,8 +59,10 @@ After subscribing, your podcatcher will be redirected to your server to get the 
 ## Future Improvements
 
 - Refactor code for better readability and performance
+- read in *.opml files and redirect rss-feeds. So that it is possible to export from podcatcher and import everything podcast free
+    - make whitelist for podcasts that anyways don't have advertisement
 - Utilize Whisper API for more efficient speech-to-text conversion -> higher cost(approx 1-2$ per podcast), could run on a raspi
-- Explore open-source alternatives to OpenAI
+- Explore open-source alternatives to OpenAI -> e.g. https://huggingface.co/morenolq/spotify-podcast-advertising-classification
 - Create a Docker container for easier deployment
 - Improve interaction with ChatGPT for better ad identification -> Testing, possiblity to flag wrong ad-marks etc.
 - Adaptive chunksize
