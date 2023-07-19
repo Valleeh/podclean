@@ -3,7 +3,17 @@ import urllib.parse
 import argparse
 import os
 
-def exchange_urls(source_file: str, destination_file: str, base_url: str):
+def load_whitelist(whitelist_file: str):
+    """
+    This function reads a text file and returns a list of the lines in the file.
+    """
+    if not os.path.isfile(whitelist_file):
+        raise FileNotFoundError(f"{whitelist_file} does not exist.")
+    
+    with open(whitelist_file, 'r') as file:
+        return [line.strip() for line in file]
+
+def exchange_urls(source_file: str, destination_file: str, base_url: str, whitelist: list):
     """
     This function reads an OPML file, replaces each RSS feed URL with a new URL that appends the original URL 
     as a query parameter to the base URL, and writes the resulting XML data to a new file.
@@ -23,9 +33,12 @@ def exchange_urls(source_file: str, destination_file: str, base_url: str):
     for outline in source_root.iter('outline'):
         if 'xmlUrl' in outline.attrib:
             old_url = outline.attrib['xmlUrl']
-            # Encode the old URL and append it to the base URL
-            new_url = base_url + urllib.parse.quote(old_url)
-            outline.attrib['xmlUrl'] = new_url
+            # Check if old URL is in the whitelist
+            if old_url not in whitelist:
+                # Encode the old URL and append it to the base URL
+                # Here we remove urllib.parse.quote to avoid URL encoding
+                new_url = base_url + old_url
+                outline.attrib['xmlUrl'] = new_url
 
     # Write the new OPML file
     try:
@@ -39,10 +52,12 @@ def main():
     parser.add_argument('-d', '--destination', required=True, help='Path to the destination OPML file.')
     parser.add_argument('-b', '--baseurl', default='http://new-feed-url.com/rss?feed=', 
                         help='Base URL to prepend to the original URLs.')
+    parser.add_argument('-w', '--whitelist', required=True, help='Path to a text file containing the whitelist of URLs.')
     args = parser.parse_args()
 
     try:
-        exchange_urls(args.source, args.destination, args.baseurl)
+        whitelist = load_whitelist(args.whitelist)
+        exchange_urls(args.source, args.destination, args.baseurl, whitelist)
         print(f"Successfully exchanged URLs in {args.source} and saved to {args.destination}")
     except Exception as e:
         print(f"Failed to exchange URLs: {e}")

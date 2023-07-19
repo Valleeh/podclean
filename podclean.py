@@ -5,6 +5,7 @@ import re
 import requests
 import whisper
 import os
+import hashlib
 def load_api_key(secrets_file="secrets.json"):
     with open(secrets_file) as f:
         secrets = json.load(f)
@@ -12,10 +13,6 @@ def load_api_key(secrets_file="secrets.json"):
 
 api_key = load_api_key()
 openai.api_key = api_key
-import threading
-
-# Create a mutex object
-mutex = threading.Lock()
 def spech_to_text(filename):
     # filename = os.path.basename(filename)
     filename2=filename[:-4]+'.bi'
@@ -52,9 +49,10 @@ def identify_advertisement_segments(text_segments,num_segments,file,completion=F
             {
               "role": "system",
               "content": f"""Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ### {text_segments} ###
-Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
-segment being ad/sponsored content.\n
-If non-ad-segments are in between ad-segments, consider classifying them as ad.\n
+Review as a whole, cluster into topics, then determine the likelihood of each topic and therefore 
+segments being ad/sponsored content.\n
+For each Cluster(topic considered as ad) justify your decision briefly\n
+For non-ad-segmentst that are in between ad-segments, justify briefly why you are not classifying them as ad.\n
 Don't awnser anything but the form.\n
 Only complete the likelihood in the following form:\n id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise) . Only Numbers and delimiters."""
             }
@@ -135,8 +133,8 @@ def process_text_segments(text_segments, file, max_retries=3, max_tokens=3696):
     COMPLETION_TOKENS_PER_SEGMENT = 6
 
     msg_tokens=num_tokens_from_string(f""""role": "assistant", "content": "Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ###  ###
-Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
-segment being ad/sponsored content.
+Translate everything into English. Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
+segment being ad/sponsored content. For identified ad-related clusters, provide a brief justification for the classification
 If non-ad-segments are in between ad-segments, consider classifying them as ad.
 Don't awnser anything but the form.
 Only complete the likelihood in the following form:nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters.""", "gpt-3.5-turbo")
@@ -328,15 +326,12 @@ def ad_segments_to_times(ad_segments,content):
     end_times = []
 
     segments=content['segments']
-    # filtered_segments = [segment for segment in segments if result_dict[int(segment['id'])]]
-
     filtered_segments = []
     for segment in segments:
         segment_id = int(segment['id'])
         if segment_id in ad_segments and ad_segments[segment_id]:
             filtered_segments.append(segment)
 
-#     print(filtered_segments)
     for segment in filtered_segments:
         start_times.append(segment['start'])
         end_times.append(segment['end'])
@@ -344,7 +339,8 @@ def ad_segments_to_times(ad_segments,content):
     merged_start_times = []
     merged_end_times = []
 
-    if len(start_times) == len(end_times):
+    # Make sure start_times and end_times are not empty
+    if start_times and end_times and len(start_times) == len(end_times):
         merged_start_times.append(start_times[0])
         current_end = end_times[0]
 
@@ -370,6 +366,7 @@ def remove_ads(input_file, output_file, start_times, end_times):
     :param start_times: List of start times in seconds.
     :param end_times: List of end times in seconds.
     """
+
     print("Loading MP3 file")
     # Load MP3 file
     try:
@@ -379,6 +376,12 @@ def remove_ads(input_file, output_file, start_times, end_times):
         return
     
     print("File loaded, duration: {} ms".format(len(audio)))
+    
+    # Check if start_times and end_times are None or empty
+    if start_times is None or end_times is None or len(start_times) == 0 or len(end_times) == 0:
+        print("No start_times or end_times provided, returning original audio.")
+        audio.export(output_file, format="mp3")
+        return
     
     # Ensure start_times and end_times have the same length
     if len(start_times) != len(end_times):
@@ -420,7 +423,10 @@ def merge_time_segments(start_times, end_times, min_duration=5.0, max_gap=20.0):
     :param min_duration: Minimum duration for a segment to be included
     :param max_gap: Maximum gap between segments to merge them
     :return: Two lists representing the start times and end times of the final segments
-    """
+    """ 
+    if not start_times or not end_times:
+        print("Warning: start_times or end_times is empty.")
+        return [], []  # or some other appropriate action
     if len(start_times) != len(end_times):
         raise ValueError("start_times and end_times must have the same length")
 
@@ -450,21 +456,6 @@ def merge_time_segments(start_times, end_times, min_duration=5.0, max_gap=20.0):
         merged_end_times.append(current_end)
 
     return merged_start_times, merged_end_times
-from flask import Flask, Response, send_file, request
-import feedparser
-
-app = Flask(__name__)
-import socket
-def get_ip_address():
-    """Get current IP address.
-    From https://stackoverflow.com/a/166589/379566
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    return s.getsockname()[0]
-SERVER_HOME = 'http://{}'.format(get_ip_address())
-from urllib.parse import urlencode
-import hashlib
 
 def download_and_process_podcast(mp3_url):
     podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
@@ -501,84 +492,3 @@ def download_and_process_podcast(mp3_url):
         print("Processsing finished")
 
     return processed_file
-
-@app.route('/podcast')
-def serve_podcast():
-    # get podcast url from query params
-    mp3_url = request.args.get('url')
-
-    if mp3_url is None:
-        abort(400, description="No URL provided")
-
-    # parse and check url scheme
-    parsed_url = urlparse(mp3_url)
-    if parsed_url.scheme not in ['https']:
-        abort(400, description="Invalid URL scheme: Only HTTPS is accepted")
-    podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
-    processed_file = podcast_file + '_processed.mp3'
-    print(processed_file)
-    if not os.path.exists(processed_file):
-        print("Process podcast")
-        mutex.acquire()
-        try:
-            if os.path.exists(processed_file):
-                return send_file(processed_file, mimetype='audio/mpeg')
-            processed_file = download_and_process_podcast(mp3_url)
-        finally:
-            mutex.release()
-    print(processed_file)
-    return send_file(processed_file, mimetype='audio/mpeg')
-
-
-
-from flask import request, abort, Response
-from urllib.parse import urlparse, urlencode
-import requests
-from lxml import etree
-@app.route('/rss')
-def serve_rss():
-    # get old rss feed url from query params
-    old_rss_url = request.args.get('feed')
-
-    # read the whitelist from a file, each url on a separate line
-    try:
-        with open('whitelist.txt', 'r') as f:
-            whitelist = [line.strip() for line in f.readlines()]
-    except IOError:
-        abort(500, description="Cannot read whitelist file")
-
-    if old_rss_url is None:
-        abort(400, description="No feed URL provided")
-
-    # parse and check url scheme
-    parsed_url = urlparse(old_rss_url)
-    if parsed_url.scheme not in ['https']:
-        abort(400, description="Invalid URL scheme: Only HTTPS is accepted")
-
-    try:
-        # Fetch the original RSS feed
-        response = requests.get(old_rss_url)
-        response.raise_for_status()  # Raises a HTTPError if the response status isn't 200
-    except requests.HTTPError as http_err:
-        abort(400, description=f"HTTP error occurred: {http_err}")
-    except Exception as err:
-        abort(500, description=f"Other error occurred: {err}")
-
-    try:
-        root = etree.fromstring(response.content)
-    except etree.ParseError as err:
-        abort(400, description=f"Error parsing the XML: {err}")
-
-    # Only change the MP3 URL(s) if the feed is not in the whitelist
-    if old_rss_url not in whitelist:
-        for enclosure in root.xpath('//enclosure'):
-            mp3_url = enclosure.get('url')
-            new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
-            enclosure.set('url', new_mp3_url)
-
-    new_feed = etree.tostring(root, xml_declaration=True, encoding='utf-8')
-
-    return Response(new_feed, mimetype='application/rss+xml')
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=58003)
