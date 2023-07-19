@@ -1,4 +1,5 @@
 from flask import Flask, Response, send_file, request
+import argparse
 from podclean import download_and_process_podcast
 import os
 import feedparser
@@ -99,4 +100,7 @@ def serve_rss():
     return Response(new_feed, mimetype='application/rss+xml')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=58003)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', default=58003, type=int, help='Port to run the server on')
+    args = parser.parse_args()
+    app.run(host='0.0.0.0', port=args.port)

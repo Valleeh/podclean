@@ -51,14 +51,14 @@ def identify_advertisement_segments(text_segments,num_segments,file,completion=F
               "content": f"""Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ### {text_segments} ###
 Review as a whole, cluster into topics, then determine the likelihood of each topic and therefore 
 segments being ad/sponsored content.\n
-For each Cluster(topic considered as ad) justify your decision briefly\n
-For non-ad-segmentst that are in between ad-segments, justify briefly why you are not classifying them as ad.\n
+For each Cluster(topic considered as ad) justify extensively your decision briefly\n
+For non-ad-segmentst that are in between ad-segments, justify extensively why you are not classifying them as ad.\n
 Don't awnser anything but the form.\n
 Only complete the likelihood in the following form:\n id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise) . Only Numbers and delimiters."""
             }
           ]
     response=ask_chatgpt(messages,num_segments)
-    print(response)
+    # print(response)
     return response
 def pre_process_text(filename):
     with open(filename, 'r') as file:
