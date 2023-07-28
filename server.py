@@ -25,9 +25,10 @@ import hashlib
 def serve_podcast():
     # get podcast url from query params
     mp3_url = request.args.get('url')
+    rss_file = request.args.get('rss')
 
-    if mp3_url is None:
-        abort(400, description="No URL provided")
+    if mp3_url is None or rss_file is None:
+            abort(400, description="No URL or RSS file name provided")
 
     # parse and check url scheme
     parsed_url = urlparse(mp3_url)
@@ -42,7 +43,7 @@ def serve_podcast():
         try:
             if os.path.exists(processed_file):
                 return send_file(processed_file, mimetype='audio/mpeg')
-            processed_file = download_and_process_podcast(mp3_url)
+            processed_file = download_and_process_podcast(mp3_url, rss_file)
         finally:
             mutex.release()
     print(processed_file)
@@ -58,6 +59,7 @@ from lxml import etree
 def serve_rss():
     # get old rss feed url from query params
     old_rss_url = request.args.get('feed')
+
 
     # read the whitelist from a file, each url on a separate line
     try:
@@ -87,12 +89,14 @@ def serve_rss():
         root = etree.fromstring(response.content)
     except etree.ParseError as err:
         abort(400, description=f"Error parsing the XML: {err}")
-
+    rss_filename=hashlib.md5(old_rss_url.encode()).hexdigest()
+    with open(rss_filename, "w" ) as f:
+        f.write(etree.tostring(root))
     # Only change the MP3 URL(s) if the feed is not in the whitelist
     if old_rss_url not in whitelist:
         for enclosure in root.xpath('//enclosure'):
             mp3_url = enclosure.get('url')
-            new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url})}'
+            new_mp3_url = f'{request.url_root}podcast?{urlencode({"url": mp3_url, "rss": rss_filename})}'
             enclosure.set('url', new_mp3_url)
 
     new_feed = etree.tostring(root, xml_declaration=True, encoding='utf-8')

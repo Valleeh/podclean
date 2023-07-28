@@ -23,7 +23,7 @@ def spech_to_text(filename):
         model = whisper.load_model('base')
         text = model.transcribe(filename)
         with open(filename2, 'w') as file:
-            json.dump(text, file)
+            json.dump(text, file, indent=4)
         #printing the transcribe
         print(text['text'])
     return filename2
@@ -44,17 +44,17 @@ def ask_chatgpt(messages,num_segments=1000):
     )
     return response["choices"][0]["message"]["content"]
 
-def identify_advertisement_segments(text_segments,num_segments,file,completion=False):
+def identify_advertisement_segments(text_segments,num_segments,completion=False):
     messages=[
             {
               "role": "system",
               "content": f"""Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ### {text_segments} ###
-Review as a whole, cluster into topics, then determine the likelihood of each topic and therefore 
-segments being ad/sponsored content.\n
-For each Cluster(topic considered as ad) justify extensively your decision briefly\n
-For non-ad-segmentst that are in between ad-segments, justify extensively why you are not classifying them as ad.\n
-Don't awnser anything but the form.\n
-Only complete the likelihood in the following form:\n id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise) . Only Numbers and delimiters."""
+                            Review as a whole, cluster into topics, then determine the likelihood of each topic and therefore 
+                            segments being ad/sponsored content.\n
+                            For each Cluster(topic considered as ad) justify extensively your decision briefly\n
+                            For non-ad-segmentst that are in between ad-segments, justify extensively why you are not classifying them as ad.\n
+                            Don't awnser anything but the form.\n
+                            Only complete the likelihood in the following form:\n id ; advertisement/sponsored content (1 if >60% likely, 0 otherwise) . Only Numbers and delimiters."""
             }
           ]
     response=ask_chatgpt(messages,num_segments)
@@ -64,6 +64,7 @@ def pre_process_text(filename):
     with open(filename, 'r') as file:
         content = json.load(file)
     return [{'id':item['id'],'text':item['text']} for item in content['segments']],content
+
 def parse_advertisement_segments(result_string):
     """
     Parses a string of identified segments and returns a dictionary.
@@ -83,6 +84,7 @@ def parse_advertisement_segments(result_string):
         try:
             segment_id, segment_value = re.split(';|:', line)
             parsed_results[int(segment_id.strip())] = int(segment_value.strip())
+
         except ValueError:
             print(f"Error parsing line: {line}")
     return parsed_results
@@ -116,6 +118,58 @@ def num_tokens_from_string(string: str, encoding_name="gpt-3.5-turbo-0613") -> i
     num_tokens = len(encoding.encode(string))
     return num_tokens
 
+def update_json(file1, classification_dict):
+    # Open and read the content of the first file
+    with open(file1, "r") as file:
+        json_content1 = json.load(file)
+        # print("Read the original JSON file.")
+
+    # Create a mapping from id to text with string ids
+    id_to_text_str = {str(segment['id']): segment['text'] for segment in json_content1['segments']}
+    # print(f"Mapped IDs to texts.: {id_to_text_str}")
+
+    # Create a new list to hold the updated dictionaries with 'text' key instead of 'segments'
+    updated_json_content_text = []
+    
+    # Iterate over each dictionary in the original content
+    for id_key, advertisement in classification_dict.items():
+        id_key=str(id_key)
+        if id_key in id_to_text_str:
+            # print(f"type(id_key): {type(id_key)}")
+            # print(f"id_key: {id_key}")
+            # If the id exists in the first JSON file, add the corresponding text
+            new_item = {
+                'id': id_key,
+                'advertisement': advertisement,
+                'text': id_to_text_str[id_key]
+            }
+            # print("Added text to the advertisement with ID:", id_key)
+        else:
+            # If the id does not exist in the first JSON file, keep the original item
+            new_item = {
+                'id': id_key,
+                'advertisement': advertisement
+            }
+            # print("The ID does not exist in the original JSON file:", id_key)
+        updated_json_content_text.append(new_item)
+
+    # Check if the output file already exists
+    if os.path.isfile(file1+"_resp"):
+        # If it exists, load the existing content and append the new content
+        with open(file1+"_resp", 'r') as f:
+            existing_content = json.load(f)
+        updated_content = existing_content + updated_json_content_text
+        print("Appended new content to the existing content.")
+    else:
+        # If it does not exist, the new content is the updated content
+        updated_content = updated_json_content_text
+        print("Created new content because the output file does not exist.")
+
+    # Write the updated content to the output file
+    with open(file1+"_resp", 'w') as f:
+        json.dump(updated_content, f , indent=4)
+
+    print("File has been successfully updated and written to", file1+"_resp")
 def process_text_segments(text_segments, file, max_retries=3, max_tokens=3696):
     """
     Processes text segments and returns cumulative results.
@@ -131,17 +185,27 @@ def process_text_segments(text_segments, file, max_retries=3, max_tokens=3696):
     cumulative_results = {}
     batch_segments = []
     COMPLETION_TOKENS_PER_SEGMENT = 6
-
+    # Load existing results
+    existing_results = {}
+    if os.path.isfile(file + "_resp.json"):
+        with open(file + "_resp.json", 'r') as result_file:
+            existing_results = json.load(result_file)
+    
+    # Add already processed segments to cumulative_results
+    cumulative_results.update(existing_results)
     msg_tokens=num_tokens_from_string(f""""role": "assistant", "content": "Act as an multilingual advertisment detecting API that recieves ordered segments of an podcast transcript: ###  ###
-Translate everything into English. Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
-segment being ad/sponsored content. For identified ad-related clusters, provide a brief justification for the classification
-If non-ad-segments are in between ad-segments, consider classifying them as ad.
-Don't awnser anything but the form.
-Only complete the likelihood in the following form:nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters.""", "gpt-3.5-turbo")
+                                        Translate everything into English. Review as a whole, cluster into topics, then determine likelihood of each topic and therefore 
+                                        segment being ad/sponsored content. For identified ad-related clusters, provide a brief justification for the classification
+                                        If non-ad-segments are in between ad-segments, consider classifying them as ad.
+                                        Don't awnser anything but the form.
+                                        Only complete the likelihood in the following form:nid ; advertisement/sponsored content (1 if >60% likely, 0 otherwise). Only Numbers and delimiters.""", "gpt-3.5-turbo")
     # print(f"Message tokens: {msg_tokens}")  # Debug print
     current_tokens = msg_tokens
     num_segments = 0
     for segment in text_segments:
+        # If the segment is already processed, skip it
+        if str(segment['id']) in existing_results:
+            continue
         segment_text = f"{segment['id']}:{segment['text']}"
         segment_tokens=num_tokens_from_string(segment_text)
         # print(f"Segment tokens: {segment_tokens}")  # Debug print
@@ -161,11 +225,12 @@ Only complete the likelihood in the following form:nid ; advertisement/sponsored
                 try:
                     result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
                     # print(f"Result string tokens: {num_tokens_from_string(result_string)}")  # Debug print
-                except openai.error.ServiceUnavailableError:
-                    try_count += 1
+                except ServiceUnavailableError:
+                    retry_count += 1
                     print(f"asking ChatGPT failed...")
                     continue
                 chunk_results = parse_advertisement_segments(result_string)
+                update_json(file, chunk_results)
                 for id, value in chunk_results.items():
                     if value == 1:
                         print(text_segments[id])
@@ -186,7 +251,7 @@ Only complete the likelihood in the following form:nid ; advertisement/sponsored
             # print(f"Last formatted segments: {formatted_segments}")  # Debug print
             result_string = ""
             try:
-                result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
+                result_string = identify_advertisement_segments(formatted_segments, num_segments)
                 # print(f"Last result string tokens: {num_tokens_from_string(result_string)}")  # Debug print
             except:
                 retry_count += 1
@@ -201,126 +266,6 @@ Only complete the likelihood in the following form:nid ; advertisement/sponsored
     return cumulative_results
 
 
-def bprocess_text_segments(text_segments, file, max_retries=3, max_tokens=3900):
-    """
-    Processes text segments and returns cumulative results.
-
-    Args:
-        text_segments: The text segments to be processed.
-        max_retries: The maximum number of retries if parsing fails.
-        max_tokens: The maximum token count per request.
-
-    Returns:
-        A dictionary containing the cumulative results.
-    """
-    cumulative_results = {}
-    batch_segments = []
-    current_tokens = 0
-    COMPLETION_TOKENS_PER_SEGMENT = 6
-
-    for num_segments, segment in enumerate(text_segments):
-        segment_text = f"{segment['id']}:{segment['text']}"
-        segment_tokens = num_tokens_from_messages([{"role": "user", "content": segment_text}], model="gpt-3.5-turbo-0613")
-
-        # If adding the current segment and its corresponding completion doesn't exceed the max_tokens limit
-        if current_tokens + segment_tokens + COMPLETION_TOKENS_PER_SEGMENT < max_tokens:
-            batch_segments.append(segment)
-            current_tokens += segment_tokens + COMPLETION_TOKENS_PER_SEGMENT
-        else:
-            # Process the current batch
-            retry_count = 0
-            while retry_count < max_retries:
-                formatted_segments = "\n".join(f"{seg['id']}:{seg['text']}" for seg in batch_segments)
-                result_string = ""
-                try:
-                    result_string = identify_advertisement_segments(formatted_segments, num_segments, file)
-                except Exception as e:
-                    try_count += 1
-                    print(f"asking ChatGPT failed Reason: {e}")
-                    continue
-
-                chunk_results = parse_advertisement_segments(result_string)
-                for id, value in chunk_results.items():
-                    if value == 1:
-                        print(text_segments[id])
-                if chunk_results:
-                    cumulative_results.update(chunk_results)
-                    break  # Break out of the retry loop if parsing is successful
-                else:
-                    retry_count += 1
-                    print("Parsing failed. Retrying...")
-
-            # Start a new batch with the current segment
-            batch_segments = [segment]
-            current_tokens = segment_tokens + COMPLETION_TOKENS_PER_SEGMENT
-
-    # Process the last batch
-    if batch_segments:
-        retry_count = 0
-        while retry_count < max_retries:
-            formatted_segments = "\n".join(f"{seg['id']}:{seg['text']}" for seg in batch_segments)
-            result_string = ""
-            try:
-                result_string = identify_advertisement_segments(formatted_segments, file)
-                print(formatted_segments)
-            except Exception as e:
-                try_count += 1
-                print(f"asking ChatGPT failed Reason: {e}")
-                continue
-
-            chunk_results = parse_advertisement_segments(result_string)
-            if chunk_results:
-                cumulative_results.update(chunk_results)
-                break  # Break out of the retry loop if parsing is successful
-            else:
-                retry_count += 1
-                print("Parsing failed. Retrying...")
-
-    return cumulative_results
-def aprocess_text_segments(text_segments, file, chunk_size=50, overlap_size=10, max_retries=3):
-    """
-    Processes text segments in chunks and returns cumulative results.
-    Includes overlap between chunks to maintain context.
-
-    Args:
-        text_segments: The text segments to be processed.
-        chunk_size: The size of each chunk.
-        overlap_size: The size of the overlap between chunks.
-        max_retries: The maximum number of retries if parsing fails.
-
-    Returns:
-        A dictionary containing the cumulative results.
-    """
-    total_segments = len(text_segments)
-    num_chunks = math.ceil((total_segments - overlap_size) / (chunk_size - overlap_size))
-    cumulative_results = {}
-
-    for chunk in range(num_chunks):
-        start_index = chunk * (chunk_size - overlap_size)
-        end_index = min(start_index + chunk_size, total_segments)
-        chunked_text_segments = text_segments[start_index:end_index]
-        formatted_segments = "\n".join(f"{segment['id']}:{segment['text']}" for segment in chunked_text_segments)
-
-        retry_count = 0
-        while retry_count < max_retries:
-#             print(formatted_segments)
-            result_string=""
-            try:
-                result_string = identify_advertisement_segments(formatted_segments,file)
-                print(formatted_segments)
-            except:
-                retry_count += 1
-                print("asking ChatGPT failed. Retrying...")
-                continue
-            chunk_results = parse_advertisement_segments(result_string)
-            if chunk_results:
-                cumulative_results.update(chunk_results)
-                break  # Break out of the retry loop if parsing is successful
-            else:
-                retry_count += 1
-                print("Parsing failed. Retrying...")
-
-    return cumulative_results
 def ad_segments_to_times(ad_segments,content):
     start_times = []
     end_times = []
@@ -457,7 +402,7 @@ def merge_time_segments(start_times, end_times, min_duration=5.0, max_gap=20.0):
 
     return merged_start_times, merged_end_times
 
-def download_and_process_podcast(mp3_url):
+def download_and_process_podcast(mp3_url, rss_file):
     podcast_file = 'podcasts/' + hashlib.md5(mp3_url.encode()).hexdigest()
     processed_file = podcast_file + '_processed.mp3'
 
@@ -480,7 +425,7 @@ def download_and_process_podcast(mp3_url):
         # add your processing logic here
         file_bi=spech_to_text(podcast_file)
         text_segments,content = pre_process_text(file_bi)
-        results_dict = process_text_segments(text_segments,podcast_file)
+        results_dict = process_text_segments(text_segments,file_bi)
         print(results_dict)
 
         merged_start_times,merged_end_times=ad_segments_to_times(results_dict, content)
